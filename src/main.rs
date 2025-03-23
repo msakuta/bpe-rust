@@ -3,16 +3,26 @@ use std::{collections::HashMap, io::Write};
 type Elem = u16;
 
 fn main() {
-    let file_name = std::env::args().nth(1).unwrap_or("data/island3.cpp".to_string());
+    let file_name = std::env::args()
+        .nth(1)
+        .unwrap_or("data/island3.cpp".to_string());
 
-    let original_file = std::fs::read_to_string(&file_name).unwrap().into_bytes().iter().map(|b| *b as Elem).collect::<Vec<_>>();
+    let original_file = std::fs::read_to_string(&file_name)
+        .unwrap()
+        .into_bytes()
+        .iter()
+        .map(|b| *b as Elem)
+        .collect::<Vec<_>>();
     let mut file = original_file.clone();
 
     let bpe = encode(&mut file);
 
-    let mut out = std::io::BufWriter::new(std::fs::File::create(format!("{file_name}.dat")).unwrap());
-    for elem in file.iter() {
-        out.write(&elem.to_le_bytes()).unwrap();
+    if let Err(e) = write_bpe(
+        &file,
+        &bpe,
+        &mut std::io::BufWriter::new(std::fs::File::create(format!("{file_name}.dat")).unwrap()),
+    ) {
+        eprintln!("Writing to a file error: {e}");
     }
 
     decode(&mut file, &bpe);
@@ -37,10 +47,8 @@ struct BpeElem {
 }
 
 fn encode(file: &mut Vec<Elem>) -> Vec<BpeElem> {
-
     let mut ret = vec![];
     for i in 0..200 {
-
         let mut bp: HashMap<[Elem; 2], usize> = HashMap::new();
 
         let start = std::time::Instant::now();
@@ -54,7 +62,7 @@ fn encode(file: &mut Vec<Elem>) -> Vec<BpeElem> {
 
         let pb = bp.iter().map(|(k, v)| (v, k)).collect::<Vec<_>>();
         let Some(max) = pb.iter().max_by_key(|(count, _)| **count) else {
-            break
+            break;
         };
 
         let code = ret.len() as Elem + 256;
@@ -76,7 +84,7 @@ fn encode(file: &mut Vec<Elem>) -> Vec<BpeElem> {
             matches,
         });
 
-        println!("[{i}] file: {} scan time: {elapsed}", file.len()); 
+        println!("[{i}] file: {} scan time: {elapsed}", file.len());
     }
     ret
 }
@@ -98,6 +106,25 @@ fn decode(file: &mut Vec<Elem>, bpe: &[BpeElem]) {
 
         let elapsed = start.elapsed().as_secs_f64();
 
-        println!("[{i}] decode: {} scan time: {elapsed}", file.len()); 
+        println!("[{i}] decode: {} scan time: {elapsed}", file.len());
     }
+}
+
+const SIGNATURE: [u8; 4] = [200, 191, 111, 0];
+
+fn write_bpe(file: &[Elem], bpe: &[BpeElem], out: &mut impl Write) -> std::io::Result<()> {
+    out.write_all(&SIGNATURE)?;
+    out.write_all(&(bpe.len() as u32).to_le_bytes())?;
+    for bpe_elem in bpe {
+        for pat in bpe_elem.pat {
+            out.write(&pat.to_le_bytes()).unwrap();
+        }
+        out.write(&bpe_elem.code.to_le_bytes()).unwrap();
+    }
+
+    for elem in file.iter() {
+        out.write(&elem.to_le_bytes()).unwrap();
+    }
+
+    Ok(())
 }
