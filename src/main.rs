@@ -251,9 +251,43 @@ fn read_bpe(input: &mut impl Read) -> std::io::Result<(Vec<Elem>, Vec<BpeElem>)>
 fn write_dot(bpe: &[BpeElem], out: &mut impl Write) -> std::io::Result<()> {
     writeln!(out, "digraph {{")?;
     for bpe_elem in bpe {
+        let elems = reconstruct_bpe_elem(bpe, bpe_elem.code);
+        let label = elems.and_then(|elems| {
+            let bytes = elems
+                .iter()
+                .filter_map(|elem| if *elem < 256 { Some(*elem as u8) } else { None })
+                .collect::<Vec<_>>();
+            let str = double_quote(&String::from_utf8(bytes).ok()?);
+            Some(double_quote(&format!("{} \"{}\"", bpe_elem.code, str)))
+        });
+        if let Some(label) = label {
+            writeln!(out, "{} [label=\"{}\"]", bpe_elem.code, label)?;
+        }
         writeln!(out, "{} -> {}", bpe_elem.code, bpe_elem.pat[0])?;
         writeln!(out, "{} -> {}", bpe_elem.code, bpe_elem.pat[1])?;
     }
     writeln!(out, "}}")?;
     Ok(())
+}
+
+fn reconstruct_bpe_elem(bpe: &[BpeElem], idx: Elem) -> Option<Vec<Elem>> {
+    if idx < 256 {
+        return Some(vec![idx]);
+    }
+    let Some(elem) = bpe.iter().find(|elem| elem.code == idx) else {
+        return None;
+    };
+    reconstruct_bpe_elem(bpe, elem.pat[0])
+        .zip(reconstruct_bpe_elem(bpe, elem.pat[1]))
+        .map(|(mut l, r)| {
+            l.extend_from_slice(&r);
+            l
+        })
+}
+
+fn double_quote(str: &str) -> String {
+    str.replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\r\n", "\\n")
+        .replace("\n", "\\n")
 }
