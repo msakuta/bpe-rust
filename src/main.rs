@@ -10,14 +10,26 @@ static DEBUG: AtomicBool = AtomicBool::new(false);
 
 fn main() {
     let mut file_name = None;
-    for arg in std::env::args() {
+    let mut output_file = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
         match &arg as &str {
             "-d" => DEBUG.store(true, std::sync::atomic::Ordering::Release),
+            "-o" => output_file = args.next(),
             _ => file_name = Some(arg),
         }
     }
 
-    let file_name = file_name.unwrap_or_else(|| "data/island3.cpp".to_string());
+    let Some(file_name) = file_name else {
+        let exe = std::env::args().next().unwrap_or_else(|| "exe".to_string());
+        println!(
+            r#"Usage: {exe} input_file [-d] [-o output_file]
+        input_file       the file name of an input text file or an encoded file (.dat)
+        -d               enable the debug flag, printing verbose information
+        -o output_file   specify the name of restored file from encoded file"#
+        );
+        return;
+    };
 
     let mut fp = std::io::BufReader::new(std::fs::File::open(&file_name).unwrap());
 
@@ -65,12 +77,14 @@ fn main() {
         // println!("{s}");
 
         assert_eq!(file, original_file);
-    } else {
+    }
+
+    if let Some(output_file) = output_file {
         let bytes = file
             .iter()
             .filter_map(|b| if *b < 256 { Some(*b as u8) } else { None })
             .collect::<Vec<_>>();
-        std::fs::write(&format!("{file_name}.decoded"), bytes).unwrap();
+        std::fs::write(&output_file, bytes).unwrap();
     }
 }
 
@@ -83,7 +97,7 @@ struct BpeElem {
 
 fn encode(file: &mut Vec<Elem>) -> Vec<BpeElem> {
     let mut ret = vec![];
-    for i in 0..200 {
+    for i in 0..1000 {
         let mut bp: HashMap<[Elem; 2], usize> = HashMap::new();
 
         let start = std::time::Instant::now();
@@ -99,6 +113,10 @@ fn encode(file: &mut Vec<Elem>) -> Vec<BpeElem> {
         let Some(max) = pb.iter().max_by_key(|(count, _)| **count) else {
             break;
         };
+
+        if *max.0 < 2 {
+            break;
+        }
 
         let code = ret.len() as Elem + 256;
         if DEBUG.load(std::sync::atomic::Ordering::Acquire) {
