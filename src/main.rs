@@ -67,7 +67,7 @@ fn main() {
 
     if let Some(dot) = dot {
         if let Ok(file) = std::fs::File::create(dot) {
-            if let Err(e) = write_dot(&bpe, &mut std::io::BufWriter::new(file)) {
+            if let Err(e) = write_dot(&bpe, &mut std::io::BufWriter::new(file), true) {
                 eprintln!("Error writing dot file: {e}");
             }
         }
@@ -248,8 +248,11 @@ fn read_bpe(input: &mut impl Read) -> std::io::Result<(Vec<Elem>, Vec<BpeElem>)>
     Ok((file, bpe))
 }
 
-fn write_dot(bpe: &[BpeElem], out: &mut impl Write) -> std::io::Result<()> {
+fn write_dot(bpe: &[BpeElem], out: &mut impl Write, horizontal: bool) -> std::io::Result<()> {
     writeln!(out, "digraph {{")?;
+    if horizontal {
+        writeln!(out, "rankdir=LR")?;
+    }
     for bpe_elem in bpe {
         let elems = reconstruct_bpe_elem(bpe, bpe_elem.code);
         let label = elems.and_then(|elems| {
