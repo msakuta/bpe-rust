@@ -11,11 +11,13 @@ static DEBUG: AtomicBool = AtomicBool::new(false);
 fn main() {
     let mut file_name = None;
     let mut output_file = None;
+    let mut dot = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match &arg as &str {
             "-d" => DEBUG.store(true, std::sync::atomic::Ordering::Release),
             "-o" => output_file = args.next(),
+            "-t" => dot = args.next(),
             _ => file_name = Some(arg),
         }
     }
@@ -23,10 +25,11 @@ fn main() {
     let Some(file_name) = file_name else {
         let exe = std::env::args().next().unwrap_or_else(|| "exe".to_string());
         println!(
-            r#"Usage: {exe} input_file [-d] [-o output_file]
+            r#"Usage: {exe} input_file [-d] [-o output_file] [-t dot_file]
         input_file       the file name of an input text file or an encoded file (.dat)
         -d               enable the debug flag, printing verbose information
-        -o output_file   specify the name of restored file from encoded file"#
+        -o output_file   specify the name of restored file from encoded file
+        -t dot_file      Output dot text for graphviz"#
         );
         return;
     };
@@ -59,6 +62,14 @@ fn main() {
             ),
         ) {
             eprintln!("Writing to a file error: {e}");
+        }
+    }
+
+    if let Some(dot) = dot {
+        if let Ok(file) = std::fs::File::create(dot) {
+            if let Err(e) = write_dot(&bpe, &mut std::io::BufWriter::new(file)) {
+                eprintln!("Error writing dot file: {e}");
+            }
         }
     }
 
@@ -235,4 +246,14 @@ fn read_bpe(input: &mut impl Read) -> std::io::Result<(Vec<Elem>, Vec<BpeElem>)>
     let file = file_buf.iter().map(|b| *b as Elem).collect();
 
     Ok((file, bpe))
+}
+
+fn write_dot(bpe: &[BpeElem], out: &mut impl Write) -> std::io::Result<()> {
+    writeln!(out, "digraph {{")?;
+    for bpe_elem in bpe {
+        writeln!(out, "{} -> {}", bpe_elem.code, bpe_elem.pat[0])?;
+        writeln!(out, "{} -> {}", bpe_elem.code, bpe_elem.pat[1])?;
+    }
+    writeln!(out, "}}")?;
+    Ok(())
 }
