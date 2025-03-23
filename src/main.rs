@@ -1,14 +1,19 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write};
 
 type Elem = u16;
 
 fn main() {
     let file_name = std::env::args().nth(1).unwrap_or("data/island3.cpp".to_string());
 
-    let original_file = std::fs::read_to_string(file_name).unwrap().into_bytes().iter().map(|b| *b as Elem).collect::<Vec<_>>();
+    let original_file = std::fs::read_to_string(&file_name).unwrap().into_bytes().iter().map(|b| *b as Elem).collect::<Vec<_>>();
     let mut file = original_file.clone();
 
     let bpe = encode(&mut file);
+
+    let mut out = std::io::BufWriter::new(std::fs::File::create(format!("{file_name}.dat")).unwrap());
+    for elem in file.iter() {
+        out.write(&elem.to_le_bytes()).unwrap();
+    }
 
     decode(&mut file, &bpe);
 
@@ -20,6 +25,7 @@ fn main() {
     // let bytes = file.iter().filter_map(|b| if *b < 256 { Some(*b as u8)} else { None }).collect::<Vec<_>>();
     // let s = String::from_utf8_lossy(&bytes);
     // println!("{s}");
+
     assert_eq!(file, original_file);
 }
 
@@ -33,7 +39,7 @@ struct BpeElem {
 fn encode(file: &mut Vec<Elem>) -> Vec<BpeElem> {
 
     let mut ret = vec![];
-    for i in 0..10 {
+    for i in 0..200 {
 
         let mut bp: HashMap<[Elem; 2], usize> = HashMap::new();
 
