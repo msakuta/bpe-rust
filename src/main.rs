@@ -21,34 +21,57 @@ fn main() {
 
     let mut fp = std::io::BufReader::new(std::fs::File::open(&file_name).unwrap());
 
-    let mut original_file = vec![];
-    fp.read_to_end(&mut original_file).unwrap();
+    let original_file;
+    let mut file;
+    let bpe;
+    if file_name.ends_with(".dat") {
+        (file, bpe) = read_bpe(&mut fp).unwrap();
+        original_file = None;
+    } else {
+        let mut tmp_original_file = vec![];
+        fp.read_to_end(&mut tmp_original_file).unwrap();
 
-    let original_file = original_file.iter().map(|b| *b as Elem).collect::<Vec<_>>();
-    let mut file = original_file.clone();
+        let tmp_original_file = tmp_original_file
+            .iter()
+            .map(|b| *b as Elem)
+            .collect::<Vec<_>>();
+        file = tmp_original_file.clone();
+        bpe = encode(&mut file);
+        original_file = Some(tmp_original_file);
 
-    let bpe = encode(&mut file);
-
-    if let Err(e) = write_bpe(
-        &file,
-        &bpe,
-        &mut std::io::BufWriter::new(std::fs::File::create(format!("{file_name}.dat")).unwrap()),
-    ) {
-        eprintln!("Writing to a file error: {e}");
+        if let Err(e) = write_bpe(
+            &file,
+            &bpe,
+            &mut std::io::BufWriter::new(
+                std::fs::File::create(format!("{file_name}.dat")).unwrap(),
+            ),
+        ) {
+            eprintln!("Writing to a file error: {e}");
+        }
     }
 
     decode(&mut file, &bpe);
 
-    println!("file: {}, original: {}", file.len(), original_file.len());
+    println!("Decoded {} bytes", file.len());
 
-    for (j, (orig, modif)) in original_file.iter().zip(file.iter()).enumerate() {
-        assert_eq!(orig, modif, "[{j}]");
+    if let Some(original_file) = original_file {
+        println!("file: {}, original: {}", file.len(), original_file.len());
+
+        for (j, (orig, modif)) in original_file.iter().zip(file.iter()).enumerate() {
+            assert_eq!(orig, modif, "[{j}]");
+        }
+        // let bytes = file.iter().filter_map(|b| if *b < 256 { Some(*b as u8)} else { None }).collect::<Vec<_>>();
+        // let s = String::from_utf8_lossy(&bytes);
+        // println!("{s}");
+
+        assert_eq!(file, original_file);
+    } else {
+        let bytes = file
+            .iter()
+            .filter_map(|b| if *b < 256 { Some(*b as u8) } else { None })
+            .collect::<Vec<_>>();
+        std::fs::write(&format!("{file_name}.decoded"), bytes).unwrap();
     }
-    // let bytes = file.iter().filter_map(|b| if *b < 256 { Some(*b as u8)} else { None }).collect::<Vec<_>>();
-    // let s = String::from_utf8_lossy(&bytes);
-    // println!("{s}");
-
-    assert_eq!(file, original_file);
 }
 
 #[derive(Debug)]
@@ -147,4 +170,51 @@ fn write_bpe(file: &[Elem], bpe: &[BpeElem], out: &mut impl Write) -> std::io::R
     }
 
     Ok(())
+}
+
+fn read_bpe(input: &mut impl Read) -> std::io::Result<(Vec<Elem>, Vec<BpeElem>)> {
+    let mut sigbuf = [0u8; 4];
+    input.read_exact(&mut sigbuf)?;
+    if sigbuf != SIGNATURE {
+        return Err(std::io::Error::other("Signature does not match"));
+    }
+
+    let mut num_bpe_elems = [0u8; std::mem::size_of::<u32>()];
+    input.read_exact(&mut num_bpe_elems)?;
+    let num_bpe_elems = u32::from_le_bytes(num_bpe_elems);
+
+    let bpe = (0..num_bpe_elems)
+        .map(|_| -> std::io::Result<_> {
+            let mut pat = [0; 2];
+            for j in 0..2 {
+                let mut pat_but = [0u8; std::mem::size_of::<Elem>()];
+                input.read_exact(&mut pat_but)?;
+                pat[j] = Elem::from_le_bytes(pat_but);
+            }
+            let mut code_buf = [0u8; std::mem::size_of::<Elem>()];
+            input.read_exact(&mut code_buf)?;
+            Ok(BpeElem {
+                pat,
+                code: Elem::from_le_bytes(code_buf),
+                matches: 0,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if DEBUG.load(std::sync::atomic::Ordering::Acquire) {
+        println!("BPE loaded {}", bpe.len());
+    }
+
+    let mut elem_buf = [0u8; std::mem::size_of::<Elem>()];
+    let mut file_buf = vec![];
+    while let Ok(size) = input.read(&mut elem_buf) {
+        if size != std::mem::size_of::<Elem>() {
+            break;
+        }
+        file_buf.push(Elem::from_le_bytes(elem_buf));
+    }
+
+    let file = file_buf.iter().map(|b| *b as Elem).collect();
+
+    Ok((file, bpe))
 }
