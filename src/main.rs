@@ -99,16 +99,18 @@ fn main() {
     }
 }
 
+/// Byte pair encoding element. An array of this will be the table to translate the encoded data and the decoded one.
+/// The code of this element is implicitly decided by adding 256 (representable value by an u8) to the index into
+/// the array.
 #[derive(Debug)]
 struct BpeElem {
     pat: [Elem; 2],
-    code: Elem,
     matches: usize,
 }
 
 fn encode(file: &mut Vec<Elem>) -> Vec<BpeElem> {
     let mut ret = vec![];
-    for i in 0..1000 {
+    for i in 0..10000 {
         let mut bp: HashMap<[Elem; 2], usize> = HashMap::new();
 
         let start = std::time::Instant::now();
@@ -146,7 +148,6 @@ fn encode(file: &mut Vec<Elem>) -> Vec<BpeElem> {
 
         ret.push(BpeElem {
             pat: *max.1,
-            code,
             matches,
         });
 
@@ -159,11 +160,13 @@ fn encode(file: &mut Vec<Elem>) -> Vec<BpeElem> {
 
 fn decode(file: &mut Vec<Elem>, bpe: &[BpeElem]) {
     for (i, bp) in bpe.iter().enumerate().rev() {
+        // Code is implicitly decided by the number of possible codes in one bytes and the index
+        let code = i as Elem + 256;
         let start = std::time::Instant::now();
 
         let mut matches = 0;
         for j in (0..file.len()).rev() {
-            if file[j] == bp.code {
+            if file[j] == code {
                 file[j] = bp.pat[0];
                 file.insert(j + 1, bp.pat[1]);
                 matches += 1;
@@ -191,7 +194,6 @@ fn write_bpe(file: &[Elem], bpe: &[BpeElem], out: &mut impl Write) -> std::io::R
         for pat in bpe_elem.pat {
             out.write(&pat.to_le_bytes()).unwrap();
         }
-        out.write(&bpe_elem.code.to_le_bytes()).unwrap();
     }
 
     for elem in file.iter() {
@@ -220,13 +222,7 @@ fn read_bpe(input: &mut impl Read) -> std::io::Result<(Vec<Elem>, Vec<BpeElem>)>
                 input.read_exact(&mut pat_but)?;
                 pat[j] = Elem::from_le_bytes(pat_but);
             }
-            let mut code_buf = [0u8; std::mem::size_of::<Elem>()];
-            input.read_exact(&mut code_buf)?;
-            Ok(BpeElem {
-                pat,
-                code: Elem::from_le_bytes(code_buf),
-                matches: 0,
-            })
+            Ok(BpeElem { pat, matches: 0 })
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -253,21 +249,22 @@ fn write_dot(bpe: &[BpeElem], out: &mut impl Write, horizontal: bool) -> std::io
     if horizontal {
         writeln!(out, "rankdir=LR")?;
     }
-    for bpe_elem in bpe {
-        let elems = reconstruct_bpe_elem(bpe, bpe_elem.code);
+    for (i, bpe_elem) in bpe.iter().enumerate() {
+        let code = i as Elem + 256;
+        let elems = reconstruct_bpe_elem(bpe, code);
         let label = elems.and_then(|elems| {
             let bytes = elems
                 .iter()
                 .filter_map(|elem| if *elem < 256 { Some(*elem as u8) } else { None })
                 .collect::<Vec<_>>();
             let str = double_quote(&String::from_utf8(bytes).ok()?);
-            Some(double_quote(&format!("{} \"{}\"", bpe_elem.code, str)))
+            Some(double_quote(&format!("{} \"{}\"", code, str)))
         });
         if let Some(label) = label {
-            writeln!(out, "{} [label=\"{}\"]", bpe_elem.code, label)?;
+            writeln!(out, "{} [label=\"{}\"]", code, label)?;
         }
-        writeln!(out, "{} -> {}", bpe_elem.code, bpe_elem.pat[0])?;
-        writeln!(out, "{} -> {}", bpe_elem.code, bpe_elem.pat[1])?;
+        writeln!(out, "{} -> {}", code, bpe_elem.pat[0])?;
+        writeln!(out, "{} -> {}", code, bpe_elem.pat[1])?;
     }
     writeln!(out, "}}")?;
     Ok(())
@@ -277,7 +274,7 @@ fn reconstruct_bpe_elem(bpe: &[BpeElem], idx: Elem) -> Option<Vec<Elem>> {
     if idx < 256 {
         return Some(vec![idx]);
     }
-    let Some(elem) = bpe.iter().find(|elem| elem.code == idx) else {
+    let Some(elem) = bpe.get(idx as usize - 256) else {
         return None;
     };
     reconstruct_bpe_elem(bpe, elem.pat[0])
