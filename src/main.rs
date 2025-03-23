@@ -1,18 +1,30 @@
-use std::{collections::HashMap, io::Write};
+use std::{
+    collections::HashMap,
+    io::{Read, Write},
+    sync::atomic::AtomicBool,
+};
 
 type Elem = u16;
 
-fn main() {
-    let file_name = std::env::args()
-        .nth(1)
-        .unwrap_or("data/island3.cpp".to_string());
+static DEBUG: AtomicBool = AtomicBool::new(false);
 
-    let original_file = std::fs::read_to_string(&file_name)
-        .unwrap()
-        .into_bytes()
-        .iter()
-        .map(|b| *b as Elem)
-        .collect::<Vec<_>>();
+fn main() {
+    let mut file_name = None;
+    for arg in std::env::args() {
+        match &arg as &str {
+            "-d" => DEBUG.store(true, std::sync::atomic::Ordering::Release),
+            _ => file_name = Some(arg),
+        }
+    }
+
+    let file_name = file_name.unwrap_or_else(|| "data/island3.cpp".to_string());
+
+    let mut fp = std::io::BufReader::new(std::fs::File::open(&file_name).unwrap());
+
+    let mut original_file = vec![];
+    fp.read_to_end(&mut original_file).unwrap();
+
+    let original_file = original_file.iter().map(|b| *b as Elem).collect::<Vec<_>>();
     let mut file = original_file.clone();
 
     let bpe = encode(&mut file);
@@ -66,8 +78,10 @@ fn encode(file: &mut Vec<Elem>) -> Vec<BpeElem> {
         };
 
         let code = ret.len() as Elem + 256;
-        println!("[{i}] bp: {}", bp.len());
-        println!("[{i}] pb: {:?}", max);
+        if DEBUG.load(std::sync::atomic::Ordering::Acquire) {
+            println!("[{i}] bp: {}", bp.len());
+            println!("[{i}] pb: {:?}", max);
+        }
 
         let mut matches = 0;
         for j in (0..file.len() - 1).rev() {
@@ -84,7 +98,9 @@ fn encode(file: &mut Vec<Elem>) -> Vec<BpeElem> {
             matches,
         });
 
-        println!("[{i}] file: {} scan time: {elapsed}", file.len());
+        if DEBUG.load(std::sync::atomic::Ordering::Acquire) {
+            println!("[{i}] file: {} scan time: {elapsed}", file.len());
+        }
     }
     ret
 }
@@ -102,11 +118,15 @@ fn decode(file: &mut Vec<Elem>, bpe: &[BpeElem]) {
             }
         }
 
-        println!("matches: {}, {}", matches, bp.matches);
-
         let elapsed = start.elapsed().as_secs_f64();
 
-        println!("[{i}] decode: {} scan time: {elapsed}", file.len());
+        if DEBUG.load(std::sync::atomic::Ordering::Acquire) {
+            println!(
+                "[{i}] decode: {file_len}, matches: {matches}, {bp_matches} scan time: {elapsed}",
+                bp_matches = bp.matches,
+                file_len = file.len()
+            );
+        }
     }
 }
 
